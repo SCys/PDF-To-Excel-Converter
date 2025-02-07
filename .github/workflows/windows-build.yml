@@ -35,7 +35,7 @@ jobs:
     - name: Build with PyInstaller
       working-directory: ConverterApp
       run: |
-        pyinstaller --onefile --windowed --name ConverterApp app.py
+        pyinstaller --onefile --windowed --name ConverterApp pdftoexcel.py
         
     - name: Create Release
       uses: softprops/action-gh-release@v1
