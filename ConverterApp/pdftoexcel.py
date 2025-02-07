@@ -1,22 +1,43 @@
-import pdfplumber
-import tabula
-from openpyxl.utils import get_column_letter
-from werkzeug.utils import secure_filename
 import os
-from flask import Flask, render_template, request, redirect, url_for, send_file
-from openpyxl import Workbook
-from openpyxl.styles import Font, Alignment, PatternFill
+import sys
+import threading
+
 import fitz
 import pandas as pd
+import pdfplumber
+import tabula
+import webview
+from flask import Flask, redirect, render_template, request, send_file, url_for
+from openpyxl import Workbook
+from openpyxl.styles import Alignment, Font, PatternFill
+from openpyxl.utils import get_column_letter
+from werkzeug.utils import secure_filename
 
-app = Flask(__name__, template_folder='templates')
+app = Flask(__name__, template_folder="templates")
 
-UPLOAD_FOLDER = 'uploads'
-ALLOWED_EXTENSIONS = {'pdf'}
-app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+
+def get_application_path():
+    """获取应用程序的运行路径"""
+    if getattr(sys, "frozen", False):
+        # PyInstaller 打包后的路径
+        application_path = os.path.dirname(sys.executable)
+    else:
+        # 开发环境下的路径
+        application_path = os.path.dirname(os.path.abspath(__file__))
+    return application_path
+
+
+# 在程序运行目录下创建 uploads 文件夹
+UPLOAD_FOLDER = os.path.join(get_application_path(), "uploads")
+ALLOWED_EXTENSIONS = {"pdf"}
+
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
+
 
 def allowed_file(filename):
-    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+    return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
+
 
 def extract_tables_from_pdf(pdf_path):
     """
@@ -29,6 +50,8 @@ def extract_tables_from_pdf(pdf_path):
             if tables:
                 all_tables.extend(tables)
     return all_tables
+
+
 def extract_pdf_content(pdf_file):
     text_content = ""
     table_data = []
@@ -45,14 +68,15 @@ def extract_pdf_content(pdf_file):
 
     return text_content, table_data
 
+
 def create_excel(text_content, table_data):
     wb = Workbook()
     ws = wb.active
     ws.title = "PDF Content"
 
     # Write text content to Excel
-    ws['A1'] = ""
-    text_lines = text_content.split('\n')
+    ws["A1"] = ""
+    text_lines = text_content.split("\n")
     current_row = 2
     max_row_position = 2
     table_data_used = set()
@@ -82,9 +106,11 @@ def create_excel(text_content, table_data):
     # Apply font to maintain formatting
     for row in ws.iter_rows():
         for cell in row:
-            cell.font = Font(name='Times New Roman', size=11)
+            cell.font = Font(name="Times New Roman", size=11)
 
     return wb
+
+
 def write_tables_to_excel(tables, excel_path):
     """
     Write tables data to an Excel file.
@@ -93,16 +119,16 @@ def write_tables_to_excel(tables, excel_path):
     workbook = Workbook()
 
     for table_num, table in enumerate(tables, start=1):
-        sheet = workbook.create_sheet(title=f'Table_{table_num}')
+        sheet = workbook.create_sheet(title=f"Table_{table_num}")
 
         # Set font styles for Excel
-        title_font = Font(name='Times New Roma', size=11, bold=True)
-        info_font = Font(name='Times New Roma', size=10)
+        title_font = Font(name="Times New Roma", size=11, bold=True)
+        info_font = Font(name="Times New Roma", size=10)
 
         # Apply formatting to headers
         bold_font = Font(bold=True)
-        alignment = Alignment(wrap_text=True, vertical='center')
-        header_fill = PatternFill(start_color='ffffff', end_color='ffffff', fill_type='solid')
+        alignment = Alignment(wrap_text=True, vertical="center")
+        header_fill = PatternFill(start_color="ffffff", end_color="ffffff", fill_type="solid")
 
         # Convert table data to pandas DataFrame
         df = pd.DataFrame(table.values, columns=[col.title() if col else "" for col in table.columns])
@@ -122,8 +148,9 @@ def write_tables_to_excel(tables, excel_path):
                 cell = sheet.cell(row=row_num, column=col_num, value=value)
                 cell.font = info_font
                 cell.alignment = alignment
-                sheet.column_dimensions[get_column_letter(col_num)].width = max(sheet.column_dimensions[get_column_letter(col_num)].width,
-                                                                                len(str(value)) + 2)  # Adjust as needed
+                sheet.column_dimensions[get_column_letter(col_num)].width = max(
+                    sheet.column_dimensions[get_column_letter(col_num)].width, len(str(value)) + 2
+                )  # Adjust as needed
 
         # Adjust row height based on the maximum text length in each row
         for row in sheet.iter_rows(min_row=1, max_row=sheet.max_row, min_col=1, max_col=sheet.max_column):
@@ -132,12 +159,15 @@ def write_tables_to_excel(tables, excel_path):
 
     workbook.remove(workbook.active)
     workbook.save(excel_path)
+
+
 def send_file_and_delete(file_path):
     try:
         response = send_file(file_path, as_attachment=True)
         return response
     finally:
         delete_files(file_path)
+
 
 def delete_files(*file_paths):
     for path in file_paths:
@@ -146,49 +176,69 @@ def delete_files(*file_paths):
                 os.remove(path)
             except PermissionError:
                 pass
-@app.route('/')
+
+
+@app.route("/")
 def index():
-    return render_template('pdftoexcel.html')
+    return render_template("pdftoexcel.html")
 
-@app.route('/upload', methods=['POST'])
+
+@app.route("/upload", methods=["POST"])
 def upload():
-    if 'pdfFile' not in request.files:
-        return redirect(url_for('index'))
+    if "pdfFile" not in request.files:
+        return redirect(url_for("index"))
 
-    file = request.files['pdfFile']
+    file = request.files["pdfFile"]
 
-    if file.filename == '':
-        return redirect(url_for('index'))
+    if file.filename == "":
+        return redirect(url_for("index"))
 
     if file and allowed_file(file.filename):
         filename = secure_filename(file.filename)
-        filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+        filepath = os.path.join(app.config["UPLOAD_FOLDER"], filename)
         file.save(filepath)
 
-        processing_option = request.form.get('processingOption')
+        processing_option = request.form.get("processingOption")
 
-        if processing_option == 'allText':
+        if processing_option == "allText":
             text_content, table_data = extract_pdf_content(file)
             excel_file = create_excel(text_content, table_data)
-            excel_file_path = 'output.xlsx'
+            excel_file_path = "output.xlsx"
             excel_file.save(excel_file_path)
             return send_file(excel_file_path, as_attachment=True)
-        elif processing_option == 'tablesOnly':
+        elif processing_option == "tablesOnly":
             tables = extract_tables_from_pdf(filepath)
             if tables:
-                excel_path = os.path.join(app.config['UPLOAD_FOLDER'], 'TablesOnly.xlsx')
+                excel_path = os.path.join(app.config["UPLOAD_FOLDER"], "TablesOnly.xlsx")
                 write_tables_to_excel(tables, excel_path)
                 delete_files(filepath)
                 return send_file_and_delete(excel_path)
             else:
                 delete_files(filepath)
-                return 'No tables found in the PDF.'
+                return "No tables found in the PDF."
         else:
             delete_files(filepath)
-            return 'Invalid processing option'
+            return "Invalid processing option"
 
-    return 'Invalid file. Please upload a PDF file.'
+    return "Invalid file. Please upload a PDF file."
+
+
+def start_flask():
+    app.run(port=5000, debug=True)
+
+
+def create_desktop_app():
+    # app.run(debug=True)
+
+    # 启动 Flask 服务
+    flask_thread = threading.Thread(target=start_flask)
+    flask_thread.daemon = True
+    flask_thread.start()
+
+    # 创建桌面窗口
+    webview.create_window("PDF To Excel Desktop App", "http://localhost:5000")
+    webview.start()
 
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    create_desktop_app()
