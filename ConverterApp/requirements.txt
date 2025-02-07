@@ -1,0 +1,8 @@
+fitz
+pandas
+pdfplumber
+tabula
+pywebview
+flask
+openpyxl
+werkzeug
